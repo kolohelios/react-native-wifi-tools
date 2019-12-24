@@ -1,3 +1,6 @@
+lib/
+types/
+
 # OSX
 #
 .DS_Store
