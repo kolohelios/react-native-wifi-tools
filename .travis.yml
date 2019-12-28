@@ -1,0 +1,39 @@
+matrix:
+  include:
+    - stage: 'Test TypeScript'
+      language: node_js
+      node_js:
+        - "node"
+      before_install:
+        - npm i -g makeshift && makeshift -r https://registry.npmjs.org
+      script:
+        - npm run build
+        - npm run test
+
+    - stage: 'Test native builds'
+      language: android
+      script: android/gradlew build
+
+    - os: osx
+      language: objective-c
+      osx_image: xcode11.2
+      before_install:
+        - brew install node
+      script: (npm i && cd ios && xcodebuild build -scheme WifiTools)
+
+    - stage: 'Deploy'
+      if: tags = true
+      language: node_js
+      node_js:
+        - "node"
+      before_install:
+        - npm i -g makeshift && makeshift -r https://registry.npmjs.org
+      script:
+        - npm run build
+      deploy:
+        provider: npm
+        email: $NPM_EMAIL
+        skip_cleanup: true
+        api_key: $NPM_TOKEN
+        on:
+          tags: true
