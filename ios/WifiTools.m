@@ -5,6 +5,10 @@
 
 @implementation WifiTools
     RCT_EXPORT_MODULE();
+        - (NSArray<NSString *> *)supportedEvents
+    {
+        return @[@"WifiEvents"];
+    }
     RCT_EXPORT_METHOD(isApiAvailable:(RCTResponseSenderBlock)callback) {
         NSNumber *available = @NO;
         if (@available(iOS 11.0, *)) {
@@ -12,14 +16,14 @@
         }
         callback(@[available]);
     }
-    
+
     RCT_EXPORT_METHOD(connect:(NSString*)ssid
                       bindNetwork:(BOOL)bindNetwork //Ignored
                       callback:(RCTResponseSenderBlock)callback) {
         if (@available(iOS 11.0, *)) {
             NEHotspotConfiguration* configuration = [[NEHotspotConfiguration alloc] initWithSSID:ssid];
             configuration.joinOnce = !bindNetwork;
-            
+
             [[NEHotspotConfigurationManager sharedManager] applyConfiguration:configuration completionHandler:^(NSError * _Nullable error) {
                 if (error != nil) {
                     callback(@[@"Error while configuring WiFi"]);
@@ -27,22 +31,26 @@
                     callback(@[[NSNull null]]);
                 }
             }];
-            
+
         } else {
             callback(@[@"Not supported in iOS<11.0"]);
         }
     }
-        
+
     RCT_EXPORT_METHOD(connectSecure:(NSString*)ssid
                       withPassphrase:(NSString*)passphrase
                       isWEP:(BOOL)isWEP
                       bindNetwork:(BOOL)bindNetwork
                       callback:(RCTResponseSenderBlock)callback) {
-        
+
+        NSString *eventName = @"starting";
+        [self sendEventWithName:@"WifiEvents"
+                           body:@{@"eventProperty" : eventName}];
+
         if (@available(iOS 11.0, *)) {
             NEHotspotConfiguration* configuration = [[NEHotspotConfiguration alloc] initWithSSID:ssid passphrase:passphrase isWEP:isWEP];
             configuration.joinOnce = !bindNetwork;
-            
+
             [[NEHotspotConfigurationManager sharedManager] applyConfiguration:configuration completionHandler:^(NSError * _Nullable error) {
                 if (error != nil) {
                     callback(@[[error localizedDescription]]);
@@ -50,16 +58,16 @@
                     callback(@[[NSNull null]]);
                 }
             }];
-            
+
         } else {
             callback(@[@"Not supported in iOS<11.0"]);
         }
     }
-    
+
     RCT_EXPORT_METHOD(removeSSID:(NSString*)ssid
                       unbindNetwork:(BOOL)unbindNetwork //Ignored
                       callback:(RCTResponseSenderBlock)callback) {
-        
+
         if (@available(iOS 11.0, *)) {
             [[NEHotspotConfigurationManager sharedManager] getConfiguredSSIDsWithCompletionHandler:^(NSArray<NSString *> *ssids) {
                 if (ssids != nil && [ssids indexOfObject:ssid] != NSNotFound) {
@@ -70,9 +78,9 @@
         } else {
             callback(@[@"Not supported in iOS<11.0"]);
         }
-        
+
     }
-    
+
     RCT_REMAP_METHOD(getSSID,
                      callback:(RCTResponseSenderBlock)callback) {
         NSString *kSSID = (NSString*) kCNNetworkInfoKeySSID;
@@ -90,4 +98,3 @@
         callback(@[@"Cannot detect SSID"]);
     }
 @end
-

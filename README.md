@@ -36,6 +36,14 @@ This project has been created from [react-native-iot-wifi](https://github.com/ta
   	```
 
 
+Permissions required:
+```
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+```
+
+
 ## Usage
 ```javascript
 import WifiTools from 'react-native-wifi-tools';

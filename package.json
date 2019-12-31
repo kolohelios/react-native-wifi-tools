@@ -1,7 +1,7 @@
 {
   "name": "react-native-wifi-tools",
   "title": "React Native Wifi Tools",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Get currently connected SSID and connect to either an open network or a network with a passphrase.",
   "main": "./lib/index.js",
   "types": "./types/index.d.ts",
@@ -10,7 +10,8 @@
     "lint": "eslint --ext .ts .",
     "clean": "rimraf lib",
     "tsc": "tsc -p .",
-    "build": "npm run lint && npm run clean && npm run tsc --"
+    "build": "npm run lint && npm run clean && npm run tsc --",
+    "release": "standard-version"
   },
   "repository": {
     "type": "git",
@@ -44,6 +45,7 @@
     "react": "^16.8.3",
     "react-native": "^0.59.10",
     "rimraf": "^3.0.0",
+    "standard-version": "^7.0.1",
     "ts-jest": "^24.2.0",
     "typescript": "^3.7.4"
   }
