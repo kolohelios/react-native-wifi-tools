@@ -1,6 +1,9 @@
 package com.kolohelios.reactnative.wifitools;
 
 import com.facebook.react.bridge.*;
+import com.facebook.react.modules.core.DeviceEventManagerModule;
+import com.facebook.react.bridge.WritableMap;
+import com.facebook.react.bridge.Arguments;
 
 import android.annotation.TargetApi;
 import android.net.ConnectivityManager;
@@ -11,11 +14,13 @@ import android.net.NetworkRequest;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiConfiguration;
+import android.net.wifi.WifiNetworkSpecifier;
 import android.content.Context;
 import android.os.Build;
 import android.util.Log;
 
 import java.util.List;
+import javax.annotation.Nullable;
 
 
 class FailureCodes {
@@ -23,12 +28,26 @@ class FailureCodes {
     static int FAILED_TO_CONNECT = 2;
     static int FAILED_TO_ADD_CONFIG = 3;
     static int FAILED_TO_BIND_CONFIG = 4;
+    static int TIMED_OUT_CONNECTING = 5;
+    static int UNABLE_TO_DISCONNECT = 6;
 }
 
 public class WifiToolsModule extends ReactContextBaseJavaModule {
     private WifiManager wifiManager;
     private ConnectivityManager connectivityManager;
     private ReactApplicationContext context;
+
+    // Sending events is good, so long as we don't spam the bridge
+    private void sendEvent(ReactContext reactContext,
+                        String eventName,
+                        String message) {
+        WritableMap params = Arguments.createMap();
+        params.putString("eventProperty", message);
+
+        reactContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter.class)
+            .emit(eventName, params);
+    }
 
     public WifiToolsModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -69,49 +88,98 @@ public class WifiToolsModule extends ReactContextBaseJavaModule {
     }
 
     private void connectToWifi(String ssid, String passphrase, Boolean isWEP, Boolean bindNetwork, Callback callback) {
-        if (Build.VERSION.SDK_INT > 28) {
-            callback.invoke("Not supported on Android Q");
-            return;
-        }
+        sendEvent(context, "WifiEvents", "starting connection to: " + ssid + " with passphrase " + passphrase);
+        sendEvent(context, "WifiEvents", "SDK version: " + Build.VERSION.SDK_INT);
+
         if (!removeSSID(ssid)) {
             callback.invoke(errorFromCode(FailureCodes.SYSTEM_ADDED_CONFIG_EXISTS));
+            sendEvent(context, "WifiEvents", "unable to remove SSID");
             return;
         }
 
-        WifiConfiguration configuration = createWifiConfiguration(ssid, passphrase, isWEP);
-        int networkId = wifiManager.addNetwork(configuration);
+        if (Build.VERSION.SDK_INT <= 28) {
+            // callback.invoke("Not supported on Android Q");
+            // return;
+            WifiConfiguration configuration = createWifiConfiguration(ssid, passphrase, isWEP);
+            int networkId = wifiManager.addNetwork(configuration);
+            sendEvent(context, "WifiEvents", "networkId: " + networkId);
 
-        if (networkId != -1) {
-            // Enable it so that android can connect
-            wifiManager.disconnect();
-            boolean success =  wifiManager.enableNetwork(networkId, true);
-            if (!success) {
+            if (networkId != -1) {
+                // Enable it so that android can connect
+                boolean disconnected = wifiManager.disconnect();
+
+                if (disconnected) {
+                    sendEvent(context, "WifiEvents", "disconnected");
+                } else {
+                    sendEvent(context, "WifiEvents", "unable to disconnect");
+                }
+
+                boolean success =  wifiManager.enableNetwork(networkId, true);
+                if (!success) {
+                    sendEvent(context, "WifiEvents", "unsuccessful enabling network with id: " + networkId);
+                    callback.invoke(errorFromCode(FailureCodes.FAILED_TO_ADD_CONFIG));
+                    return;
+                } else {
+                    sendEvent(context, "WifiEvents", "successfully enabled network with id: " + networkId);
+                }
+                success = wifiManager.reconnect();
+                if (!success) {
+                    sendEvent(context, "WifiEvents", "unsuccessful reconnecting");
+                    callback.invoke(errorFromCode(FailureCodes.FAILED_TO_CONNECT));
+                    return;
+                } else {
+                    sendEvent(context, "WifiEvents", "successfully reconnected");
+                }
+                boolean connected = pollForValidSsid(10, ssid);
+                if (!connected) {
+                    if (!disconnected) {
+                        callback.invoke(errorFromCode(FailureCodes.UNABLE_TO_DISCONNECT));
+                    } else {
+                        callback.invoke(errorFromCode(FailureCodes.TIMED_OUT_CONNECTING));
+                    }
+                    return;
+                }
+                if (!bindNetwork) {
+                    callback.invoke();
+                    return;
+                }
+                try {
+                    bindToNetwork(ssid, callback);
+                } catch (Exception e) {
+                    Log.d("WifiTools", "Failed to bind to Wifi: " + ssid);
+                    callback.invoke();
+                }
+            } else {
                 callback.invoke(errorFromCode(FailureCodes.FAILED_TO_ADD_CONFIG));
-                return;
-            }
-            success = wifiManager.reconnect();
-            if (!success) {
-                callback.invoke(errorFromCode(FailureCodes.FAILED_TO_CONNECT));
-                return;
-            }
-            boolean connected = pollForValidSSSID(10, ssid);
-            if (!connected) {
-                callback.invoke(errorFromCode(FailureCodes.FAILED_TO_CONNECT));
-                return;
-            }
-            if (!bindNetwork) {
-                callback.invoke();
-                return;
-            }
-            try {
-                bindToNetwork(ssid, callback);
-            } catch (Exception e) {
-                Log.d("WifiTools", "Failed to bind to Wifi: " + ssid);
-                callback.invoke();
             }
         } else {
-            callback.invoke(errorFromCode(FailureCodes.FAILED_TO_ADD_CONFIG));
+            WifiNetworkSpecifier.Builder builder = new WifiNetworkSpecifier.Builder();
+            builder.setSsid(ssid);
+            builder.setWpa2Passphrase(passphrase);
+
+            WifiNetworkSpecifier wifiNetworkSpecifier = builder.build();
+            // networkId = wifiManager.addNetwork(wifiNetworkSpecifier);
+
+            NetworkRequest.Builder networkRequestBuilder1 = new NetworkRequest.Builder();
+            networkRequestBuilder1.addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
+            networkRequestBuilder1.setNetworkSpecifier(wifiNetworkSpecifier);
+
+            NetworkRequest nr = networkRequestBuilder1.build();
+            final ConnectivityManager cm = (ConnectivityManager)
+                    context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            ConnectivityManager.NetworkCallback networkCallback = new
+                ConnectivityManager.NetworkCallback() {
+                @Override
+                public void onAvailable(Network network) {
+                    super.onAvailable(network);
+                    Log.d("Hello", "onAvailable:" + network);
+                    cm.bindProcessToNetwork(network);
+                }
+            };
+            cm.requestNetwork(nr, networkCallback);
         }
+
+
     }
 
     private WifiConfiguration createWifiConfiguration(String ssid, String passphrase, Boolean isWEP) {
@@ -135,19 +203,19 @@ public class WifiToolsModule extends ReactContextBaseJavaModule {
         return configuration;
     }
 
-    private boolean pollForValidSSSID(int maxSeconds, String expectedSSID) {
-        try {
-            for (int i = 0; i < maxSeconds; i++) {
-                String ssid = this.getWifiSSID();
-                if (ssid != null && ssid.equalsIgnoreCase(expectedSSID)) {
-                    return true;
-                }
-                Thread.sleep(1000);
-            }
-        } catch (InterruptedException e) {
-            return false;
+    private boolean pollForValidSsid(int maxSeconds, String expectedSSID) {
+      try {
+        for (int i = 0; i < maxSeconds; i++) {
+          String ssid = this.getWifiSSID();
+          if (ssid != null && ssid.equalsIgnoreCase(expectedSSID)) {
+            return true;
+          }
+          Thread.sleep(1000);
         }
+      } catch (InterruptedException e) {
         return false;
+      }
+      return false;
     }
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
